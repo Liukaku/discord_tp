@@ -11,6 +11,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	"github.com/liukaku/discord-tp/cmd/handlers"
 )
 
 var discord *discordgo.Session
@@ -54,7 +55,7 @@ func bodyOne(i *discordgo.InteractionCreate) *discordgo.InteractionResponseData 
 								Label:       "Option 1",
 								Value:       "option-1",
 								Description: "This is option 1",
-								Default:     true,
+								Default:     false,
 							},
 							{
 								Label:       "Option 2",
@@ -72,6 +73,9 @@ func bodyOne(i *discordgo.InteractionCreate) *discordgo.InteractionResponseData 
 						CustomID:    "channel-select",
 						Placeholder: "Select a channel",
 						MenuType:    discordgo.ChannelSelectMenu,
+						ChannelTypes: []discordgo.ChannelType{
+							discordgo.ChannelTypeGuildText,
+						},
 					},
 				},
 			},
@@ -163,8 +167,19 @@ var commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.Interac
 
 func addHandlers() {
 	discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
-			h(s, i)
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			fmt.Println("New Event: InteractionCreate: ")
+			fmt.Println(i.ApplicationCommandData().Name)
+			fmt.Println(i.ApplicationCommandData().Options)
+			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+				h(s, i)
+			}
+		case discordgo.InteractionMessageComponent:
+			fmt.Println("New Event: InteractionCreate: ")
+			fmt.Println(i.MessageComponentData().CustomID)
+			fmt.Println(i.MessageComponentData().Values)
+			handlers.SelectHandler(s, i)
 		}
 	})
 }
@@ -176,6 +191,7 @@ func main() {
 	fmt.Println("Bot Launching")
 	err := godotenv.Load()
 	if err != nil {
+		fmt.Println("Error loading .env file")
 		panic(err)
 	}
 
@@ -184,13 +200,12 @@ func main() {
 
 	discord, err = discordgo.New("Bot " + discordKey)
 	if err != nil {
+		fmt.Println("Error creating Discord session, make sure you have the correct token")
 		panic(err)
 	}
 
 	err = discord.Open()
-
 	// Register the command handlers
-
 	addHandlers()
 	registeredCommands := make([]*discordgo.ApplicationCommand, len(commands))
 	for i, v := range commands {
@@ -321,6 +336,7 @@ type HttpResponse struct {
 func createHttpServer() {
 	err := godotenv.Load()
 	if err != nil {
+		fmt.Println("Error loading .env file")
 		panic(err)
 	}
 	// channelId := os.Getenv("CHANNEL_ID")
