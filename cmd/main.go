@@ -1,20 +1,81 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 	"github.com/liukaku/discord-tp/cmd/handlers"
+	"github.com/liukaku/discord-tp/cmd/server"
 )
 
 var discord *discordgo.Session
+
+// Create a struct to hold our shared state with a mutex
+type SharedState struct {
+	sync.RWMutex
+	StateArr      []string
+	ChannelIDs    []string
+	BusinessUnits []string
+}
+
+// Create a global instance of our shared state
+var sharedState = SharedState{
+	StateArr:      []string{},
+	ChannelIDs:    []string{},
+	BusinessUnits: []string{},
+}
+
+// Add helper methods to safely access and modify state
+func (s *SharedState) GetStateArr() []string {
+	s.RLock()
+	defer s.RUnlock()
+	// Return a copy to prevent race conditions
+	result := make([]string, len(s.StateArr))
+	copy(result, s.StateArr)
+	return result
+}
+
+func (s *SharedState) GetChannelIDs() []string {
+	s.RLock()
+	defer s.RUnlock()
+	result := make([]string, len(s.ChannelIDs))
+	copy(result, s.ChannelIDs)
+	return result
+}
+
+func (s *SharedState) GetBuids() []string {
+	s.RLock()
+	defer s.RUnlock()
+	result := make([]string, len(s.BusinessUnits))
+	copy(result, s.BusinessUnits)
+	return result
+}
+
+func (s *SharedState) AppendToStateArr(values ...string) {
+	s.Lock()
+	defer s.Unlock()
+	s.StateArr = append(s.StateArr, values...)
+	fmt.Println("Updated State Array:", s.StateArr)
+}
+
+func (s *SharedState) AppendToChannelIDs(values ...string) {
+	s.Lock()
+	defer s.Unlock()
+	s.ChannelIDs = append(s.ChannelIDs, values...)
+	fmt.Println("Updated Channel IDs:", s.ChannelIDs)
+}
+
+func (s *SharedState) AppendToBuids(values ...string) {
+	s.Lock()
+	defer s.Unlock()
+	s.BusinessUnits = append(s.BusinessUnits, values...)
+	fmt.Println("Updated Business Units:", s.BusinessUnits)
+}
 
 var (
 	GuildID        = flag.String("guild", "", "Test guild ID. If not passed - bot registers commands globally")
@@ -38,130 +99,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "Test command",
 		Type:        discordgo.ChatApplicationCommand,
 	},
-}
-
-func bodyOne(i *discordgo.InteractionCreate) *discordgo.InteractionResponseData {
-	return &discordgo.InteractionResponseData{
-		Content: "Lets take a look at these settings" + i.Interaction.Member.User.ID,
-		Flags:   discordgo.MessageFlagsEphemeral,
-		Components: []discordgo.MessageComponent{
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.SelectMenu{
-						CustomID:    "select-1",
-						Placeholder: "Select an option",
-						Options: []discordgo.SelectMenuOption{
-							{
-								Label:       "Option 1",
-								Value:       "option-1",
-								Description: "This is option 1",
-								Default:     false,
-							},
-							{
-								Label:       "Option 2",
-								Value:       "option-2",
-								Description: "This is option 2",
-								Default:     false,
-							},
-						},
-					},
-				},
-			},
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.SelectMenu{
-						CustomID:    "channel-select",
-						Placeholder: "Select a channel",
-						MenuType:    discordgo.ChannelSelectMenu,
-						ChannelTypes: []discordgo.ChannelType{
-							discordgo.ChannelTypeGuildText,
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-func bodyTwo(i *discordgo.InteractionCreate) *discordgo.InteractionResponseData {
-	return &discordgo.InteractionResponseData{
-		CustomID: "modals_survey_" + i.Interaction.Member.User.ID,
-		Title:    "Modals survey",
-		Components: []discordgo.MessageComponent{
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.TextInput{
-						CustomID:    "opinion",
-						Label:       "What is your opinion on them?",
-						Style:       discordgo.TextInputShort,
-						Placeholder: "Don't be shy, share your opinion with us",
-						Required:    true,
-						MaxLength:   300,
-						MinLength:   10,
-					},
-				},
-			},
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.TextInput{
-						CustomID:  "suggestions",
-						Label:     "What would you suggest to improve them?",
-						Style:     discordgo.TextInputParagraph,
-						Required:  false,
-						MaxLength: 2000,
-					},
-				},
-			},
-		},
-	}
-}
-
-var commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
-	"settings": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: bodyOne(i),
-		})
-
-		if err != nil {
-			fmt.Println("Error responding to interaction: ", err)
-			return
-		}
-	},
-	// "settings": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-	// 		Type: discordgo.InteractionResponseModal,
-	// 		Data: bodyTwo(i),
-	// 	})
-
-	// 	if err != nil {
-	// 		fmt.Println("Error responding to interaction: ", err)
-	// 		return
-	// 	}
-	// },
-	"test": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Test command executed",
-			},
-		})
-	},
-	"modal": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Test command executed",
-			},
-		})
-	},
-	"ready": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Test command executed",
-			},
-		})
+	{
+		Name:        "login",
+		Description: "Login to the bot",
+		Type:        discordgo.ChatApplicationCommand,
 	},
 }
 
@@ -169,24 +110,20 @@ func addHandlers() {
 	discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
-			fmt.Println("New Event: InteractionCreate: ")
+			fmt.Println("New Command Event: InteractionCreate: ")
 			fmt.Println(i.ApplicationCommandData().Name)
 			fmt.Println(i.ApplicationCommandData().Options)
-			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
-				h(s, i)
-			}
+			handlers.CommandHandler(s, i, &sharedState)
 		case discordgo.InteractionMessageComponent:
-			fmt.Println("New Event: InteractionCreate: ")
+			fmt.Println("New Interaction Event: InteractionCreate: ")
 			fmt.Println(i.MessageComponentData().CustomID)
 			fmt.Println(i.MessageComponentData().Values)
-			handlers.SelectHandler(s, i)
+			handlers.SelectHandler(s, i, &sharedState)
 		}
 	})
 }
 
 func main() {
-
-	go createHttpServer()
 
 	fmt.Println("Bot Launching")
 	err := godotenv.Load()
@@ -205,6 +142,10 @@ func main() {
 	}
 
 	err = discord.Open()
+
+	// Create a new HTTP server to handle requests
+	go server.CreateHttpServer(discord, &sharedState)
+
 	// Register the command handlers
 	addHandlers()
 	registeredCommands := make([]*discordgo.ApplicationCommand, len(commands))
@@ -258,17 +199,6 @@ func main() {
 	fmt.Printf("Gracefully shutting down.")
 }
 
-func test(m *discordgo.MessageCreate) {
-	channel, err := discord.Channel("1234")
-	if err != nil {
-		fmt.Println("Error getting channel: ", err)
-		return
-	}
-	discord.MessageThreadStartComplex(channel.ID, m.ID, &discordgo.ThreadStart{
-		Name: "Test thread",
-	})
-}
-
 func ready(s *discordgo.Session, event *discordgo.Ready) {
 
 	fmt.Println("New Event: Ready: ")
@@ -283,37 +213,6 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 		}
 	}
 
-}
-
-func modalCreate(s *discordgo.Session, m *discordgo.InteractionCreate) {
-	fmt.Println("New Event: Message: ")
-	fmt.Println(m.Interaction.ChannelID)
-
-	s.InteractionRespond(m.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseModal,
-		Data: &discordgo.InteractionResponseData{
-			Title:    "Modal Title",
-			CustomID: "modal-1",
-			Components: []discordgo.MessageComponent{
-				discordgo.StringSelectMenu: &discordgo.SelectMenu{
-					CustomID:    "select-1",
-					Placeholder: "Select an option",
-					Options: []discordgo.SelectMenuOption{
-						{
-							Label:       "Option 1",
-							Value:       "option-1",
-							Description: "This is option 1",
-						},
-						{
-							Label:       "Option 2",
-							Value:       "option-2",
-							Description: "This is option 2",
-						},
-					},
-				},
-			},
-		},
-	})
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -331,47 +230,4 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 type HttpResponse struct {
 	Hi  int `json:"hi"`
 	Bye int `json:"bye"`
-}
-
-func createHttpServer() {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("Error loading .env file")
-		panic(err)
-	}
-	// channelId := os.Getenv("CHANNEL_ID")
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// wg.Add(1)
-		fmt.Println("received get request")
-		fmt.Println(r.Method)
-		fmt.Println(r.Body)
-		// read request body
-		var resp map[string]interface{}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "can't read body", http.StatusBadRequest)
-			panic(err)
-		}
-		json.Unmarshal(body, &resp)
-		fmt.Println(string(body))
-		fmt.Println(resp)
-		// io.WriteString(w, fmt.Sprintf("Received request: %s \n song number: %s", r.Method, k))
-		// get all guilds the bot is in
-		guilds, err := discord.UserGuilds(100, "", "", true)
-		for i, guild := range guilds {
-			fmt.Printf("Guild %d: %s (%s)\n", i, guild.Name, guild.ID)
-			channels, _ := discord.GuildChannels(guild.ID)
-			for i, channel := range channels {
-				fmt.Printf("Channel %d: %s (%s)\n", i, channel.Name, channel.ID)
-				discord.ChannelMessageSend(channel.ID, "iyaaaaaaa")
-			}
-		}
-		// get all channels in the guild
-
-	})
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		fmt.Println(err)
-	}
 }
