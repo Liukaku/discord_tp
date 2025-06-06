@@ -223,6 +223,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	fmt.Println("New Event: Message: ")
 	fmt.Println(m.Message.Content)
 	fmt.Println(m.Message.ChannelID)
+	fmt.Println(m.ReferencedMessage.Embeds[0].URL)
 	//create a modal for the user to fill out
 	s.ChannelMessageSendReply(m.ChannelID, "bing bong", m.Message.Reference())
 }
