@@ -28,54 +28,81 @@ func StoreTokenHandler(w http.ResponseWriter, r *http.Request, state types.Share
 	fmt.Println("Token type:", tokenData.TokenType)
 	fmt.Println("Expires in:", tokenData.ExpiresIn)
 
-	response, err := utils.HttpGetRequest("https://api.tp-staging.com/v1/private/me", tokenData.AccessToken)
+	userInfo, err := getAboutMe(tokenData.AccessToken)
+
+	if err != nil {
+		http.Error(w, "Error fetching user info", http.StatusInternalServerError)
+		return
+	}
+
+	businessUnitsInfo, err := getBusinessUnitsInfo(userInfo.BusinessUser.ID, tokenData.AccessToken)
+
+	if err != nil {
+		http.Error(w, "Error fetching business units info", http.StatusInternalServerError)
+		return
+	}
+
+	for _, bu := range businessUnitsInfo.BusinessUnits {
+		businessUnitDetails, err := getSingleBusinessUnitInfo(bu.ID, tokenData.AccessToken)
+
+		if err != nil {
+			http.Error(w, "Error fetching single business unit info", http.StatusInternalServerError)
+			return
+		}
+
+		state.AppendToBuids(businessUnitDetails.DisplayName)
+	}
+}
+
+func getAboutMe(accessToken string) (*types.UserResponse, error) {
+	response, err := utils.HttpGetRequest("https://api.tp-staging.com/v1/private/me", accessToken)
 	if err != nil {
 		fmt.Println("Error making API request:", err)
-		// Handle the error appropriately
+		return nil, err
 	}
 
 	userInfo, err := utils.ProcessUserResponse(response)
 	if err != nil {
 		fmt.Println("Error parsing user info:", err)
+		return nil, err
 	}
 
-	buidUrl := fmt.Sprintf("https://api.tp-staging.com/v1/private/business-users/%s/business-units", userInfo.BusinessUser.ID)
-	businessUnitsResponse, err := utils.HttpGetRequest(buidUrl, tokenData.AccessToken)
+	return userInfo, nil
+}
 
-	fmt.Println("User name:", userInfo.BusinessUser.Name)
-	fmt.Println("User email:", userInfo.BusinessUser.Email)
+func getBusinessUnitsInfo(businessUserId string, accessToken string) (*types.BusinessUnitsResponse, error) {
+	buidUrl := fmt.Sprintf("https://api.tp-staging.com/v1/private/business-users/%s/business-units", businessUserId)
+	businessUnitsResponse, err := utils.HttpGetRequest(buidUrl, accessToken)
 
 	if err != nil {
 		fmt.Println("Error making business units API request:", err)
-		http.Error(w, "Error fetching business units", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	businessUnitsInfo, err := utils.ProcessBusinessUnitsResponse(businessUnitsResponse)
 	if err != nil {
 		fmt.Println("Error parsing business units info:", err)
-		http.Error(w, "Error parsing business units info", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	fmt.Println("Business Units:")
 
-	for _, bu := range businessUnitsInfo.BusinessUnits {
-		buidInfoUrl := fmt.Sprintf("https://api.tp-staging.com/v1/private/business-units/%s", bu.ID)
-		time.Sleep(500 * time.Millisecond) // Add delay to avoid throttling
-		buInfoResponse, err := utils.HttpGetRequest(buidInfoUrl, tokenData.AccessToken)
-		if err != nil {
-			fmt.Println("Error making business unit info API request:", err)
-			http.Error(w, "Error fetching business unit info", http.StatusInternalServerError)
-			return
-		}
+	return businessUnitsInfo, nil
+}
 
-		businessUnitDetails, err := utils.ProcessBusinessUnitDetails(buInfoResponse)
-		if err != nil {
-			fmt.Println("Error parsing business unit details:", err)
-			http.Error(w, "Error parsing business unit details", http.StatusInternalServerError)
-			return
-		}
-		fmt.Printf("Business Unit ID: %s\n", businessUnitDetails.ID)
-		fmt.Printf("Business Unit Display Name: %s\n", businessUnitDetails.DisplayName)
-		state.AppendToBuids(businessUnitDetails.DisplayName)
+func getSingleBusinessUnitInfo(businessUnitId string, accessToken string) (*types.BusinessUnitDetails, error) {
+	buidInfoUrl := fmt.Sprintf("https://api.tp-staging.com/v1/private/business-units/%s", businessUnitId)
+	time.Sleep(500 * time.Millisecond) // Add delay to avoid throttling
+	buInfoResponse, err := utils.HttpGetRequest(buidInfoUrl, accessToken)
+	if err != nil {
+		fmt.Println("Error making business unit info API request:", err)
+		return nil, err
 	}
+
+	businessUnitDetails, err := utils.ProcessBusinessUnitDetails(buInfoResponse)
+	if err != nil {
+		fmt.Println("Error parsing business unit details:", err)
+		return nil, err
+	}
+	fmt.Printf("Business Unit ID: %s\n", businessUnitDetails.ID)
+	fmt.Printf("Business Unit Display Name: %s\n", businessUnitDetails.DisplayName)
+	return businessUnitDetails, nil
 }
